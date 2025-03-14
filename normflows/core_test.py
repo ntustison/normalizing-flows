@@ -5,7 +5,7 @@ from torch.testing import assert_close
 from normflows import NormalizingFlow, ClassCondFlow, \
     MultiscaleFlow, NormalizingFlowVAE, \
     ConditionalNormalizingFlow
-from normflows.flows import MaskedAffineFlow, GlowBlock, \
+from normflows.flows import MaskedAffineFlow, GlowBlock2D, \
     Merge, Squeeze, MaskedAffineAutoregressive, \
     AutoregressiveRationalQuadraticSpline
 from normflows.nets import MLP
@@ -160,7 +160,7 @@ class CoreTest(unittest.TestCase):
                 for i in range(L):
                     flows_ = []
                     for j in range(K):
-                        flows_ += [GlowBlock(input_shape[0] * 2 ** (L + 1 - i), hidden_channels,
+                        flows_ += [GlowBlock2D(input_shape[0] * 2 ** (L + 1 - i), hidden_channels,
                                              split_mode=split_mode, scale=scale)]
                     flows_ += [Squeeze()]
                     flows += [flows_]

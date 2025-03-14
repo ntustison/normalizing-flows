@@ -12,6 +12,4 @@ from .coupling import (
     AffineCouplingBlock,
 )
 
-from .glow import GlowBlock
-
 from .autoregressive import MaskedAffineAutoregressive

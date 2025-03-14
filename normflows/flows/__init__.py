@@ -1,7 +1,7 @@
 from .base import Flow, Reverse, Composite
 
 from .reshape import Merge, Split, Squeeze
-from .mixing import Permute, InvertibleAffine, Invertible1x1Conv, LULinearPermute
+from .mixing import Permute, InvertibleAffine, Invertible1x1Conv, Invertible1x1x1Conv, LULinearPermute
 from .periodic import PeriodicWrap, PeriodicShift
 
 from .planar import Planar
@@ -15,7 +15,7 @@ from .affine.coupling import (
     MaskedAffineFlow,
     AffineCouplingBlock,
 )
-from .affine.glow import GlowBlock
+from .affine.glow import GlowBlock2D, GlowBlock3D
 from .affine.autoregressive import MaskedAffineAutoregressive
 
 from .normalization import BatchNorm, ActNorm
