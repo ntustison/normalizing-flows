@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from normflows.flows import GlowBlock2D, GlowBlock3D
+from normflows.flows import GlowBlock2d, GlowBlock3d
 from normflows.flows.flow_test import FlowTest
 
 
@@ -23,12 +23,12 @@ class GlowTest(FlowTest):
                               scale=scale, split_mode=split_mode,
                               use_lu=use_lu, net_actnorm=net_actnorm):
                 inputs_2d = torch.rand((batch_size, channels) + img_size_2d)
-                flow_2d = GlowBlock2D(channels, hidden_channels,
+                flow_2d = GlowBlock2d(channels, hidden_channels,
                                  scale=scale, split_mode=split_mode,
                                  use_lu=use_lu, net_actnorm=net_actnorm)
                 self.checkForwardInverse(flow_2d, inputs_2d)
                 inputs_3d = torch.rand((batch_size, channels) + img_size_3d)
-                flow_3d = GlowBlock3D(channels, hidden_channels,
+                flow_3d = GlowBlock3d(channels, hidden_channels,
                                  scale=scale, split_mode=split_mode,
                                  use_lu=use_lu, net_actnorm=net_actnorm)
                 self.checkForwardInverse(flow_3d, inputs_3d)

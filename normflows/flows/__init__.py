@@ -15,7 +15,7 @@ from .affine.coupling import (
     MaskedAffineFlow,
     AffineCouplingBlock,
 )
-from .affine.glow import GlowBlock2D, GlowBlock3D
+from .affine.glow import GlowBlock2d, GlowBlock3d
 from .affine.autoregressive import MaskedAffineAutoregressive
 
 from .normalization import BatchNorm, ActNorm

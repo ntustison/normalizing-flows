@@ -8,7 +8,7 @@ from ..normalization import ActNorm
 from ... import nets
 
 
-class GlowBlock2D(Flow):
+class GlowBlock2d(Flow):
     """Glow: Generative Flow with Invertible 1×1 Convolutions, [arXiv: 1807.03039](https://arxiv.org/abs/1807.03039)
 
     One Block of the Glow model, comprised of
@@ -83,7 +83,7 @@ class GlowBlock2D(Flow):
             log_det_tot += log_det
         return z, log_det_tot
 
-class GlowBlock3D(Flow):
+class GlowBlock3d(Flow):
     """Glow: Generative Flow with Invertible 1×1x1 Convolutions, [arXiv: 1807.03039](https://arxiv.org/abs/1807.03039)
 
     One Block of the Glow model, comprised of
