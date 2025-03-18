@@ -195,7 +195,7 @@ class Invertible1x1x1Conv(Flow):
             log_det = -torch.slogdet(self.W)[1]
         W = W.view(self.num_channels, self.num_channels, 1, 1, 1)
         z_ = torch.nn.functional.conv3d(z, W)
-        log_det = log_det * z.size(2) * z.size(3)
+        log_det = log_det * z.size(2) * z.size(3) * z.size(4)
         return z_, log_det
 
     def inverse(self, z):
@@ -207,7 +207,7 @@ class Invertible1x1x1Conv(Flow):
             log_det = torch.slogdet(self.W)[1]
         W = W.view(self.num_channels, self.num_channels, 1, 1, 1)
         z_ = torch.nn.functional.conv3d(z, W)
-        log_det = log_det * z.size(2) * z.size(3)
+        log_det = log_det * z.size(2) * z.size(3) * z.size(4)
         return z_, log_det
 
 class InvertibleAffine(Flow):
