@@ -5,8 +5,9 @@ from torch.testing import assert_close
 from normflows import NormalizingFlow, ClassCondFlow, \
     MultiscaleFlow, NormalizingFlowVAE, \
     ConditionalNormalizingFlow
-from normflows.flows import MaskedAffineFlow, GlowBlock2D, \
-    Merge, Squeeze, MaskedAffineAutoregressive, \
+from normflows.flows import MaskedAffineFlow, \
+    GlowBlock2d, GlowBlock3d, Merge, \
+    Squeeze2d, Squeeze3d, MaskedAffineAutoregressive, \
     AutoregressiveRationalQuadraticSpline
 from normflows.nets import MLP
 from normflows.distributions.base import DiagGaussian, \
@@ -160,9 +161,9 @@ class CoreTest(unittest.TestCase):
                 for i in range(L):
                     flows_ = []
                     for j in range(K):
-                        flows_ += [GlowBlock2D(input_shape[0] * 2 ** (L + 1 - i), hidden_channels,
+                        flows_ += [GlowBlock2d(input_shape[0] * 2 ** (L + 1 - i), hidden_channels,
                                              split_mode=split_mode, scale=scale)]
-                    flows_ += [Squeeze()]
+                    flows_ += [Squeeze2d()]
                     flows += [flows_]
                     if i > 0:
                         merges += [Merge()]

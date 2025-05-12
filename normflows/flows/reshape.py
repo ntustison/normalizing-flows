@@ -100,7 +100,7 @@ class Merge(Split):
         return super().forward(z)
 
 
-class Squeeze(Flow):
+class Squeeze2d(Flow):
     """
     Squeeze operation of multi-scale architecture, RealNVP or Glow paper
     """
@@ -125,4 +125,33 @@ class Squeeze(Flow):
         z = z.view(*s[:2], s[2] // 2, 2, s[3] // 2, 2)
         z = z.permute(0, 1, 3, 5, 2, 4).contiguous()
         z = z.view(s[0], 4 * s[1], s[2] // 2, s[3] // 2)
+        return z, log_det
+
+class Squeeze3d(Flow):
+    """
+    Squeeze operation for 3D images, extending the concept from Glow.
+    """
+
+    def __init__(self):
+        """
+        Constructor
+        """
+        super().__init__()
+
+    def forward(self, z):
+        log_det = 0
+        s = z.size()
+        # Ensure the number of channels is divisible by 8
+        assert s[1] % 8 == 0, "Number of channels must be divisible by 8 for 3D Squeeze."
+        z = z.view(s[0], s[1] // 8, 2, 2, 2, s[2], s[3], s[4])
+        z = z.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+        z = z.view(s[0], s[1] // 8, 2 * s[2], 2 * s[3], 2 * s[4])
+        return z, log_det
+
+    def inverse(self, z):
+        log_det = 0
+        s = z.size()
+        z = z.view(*s[:2], s[2] // 2, 2, s[3] // 2, 2, s[4] // 2, 2)
+        z = z.permute(0, 1, 3, 6, 2, 4, 7, 5).contiguous()
+        z = z.view(s[0], 8 * s[1], s[2] // 2, s[3] // 2, s[4] // 2)
         return z, log_det

@@ -1,6 +1,6 @@
 from .base import Flow, Reverse, Composite
 
-from .reshape import Merge, Split, Squeeze
+from .reshape import Merge, Split, Squeeze2d, Squeeze3d
 from .mixing import Permute, InvertibleAffine, Invertible1x1Conv, Invertible1x1x1Conv, LULinearPermute
 from .periodic import PeriodicWrap, PeriodicShift
 
