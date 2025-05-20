@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import numpy as np
 
 from .base import Flow
 
@@ -84,7 +86,6 @@ class Split(Flow):
         log_det = 0
         return z, log_det
 
-
 class Merge(Split):
     """
     Same as Split but with forward and backward pass interchanged
@@ -141,17 +142,16 @@ class Squeeze3d(Flow):
     def forward(self, z):
         log_det = 0
         s = z.size()
-        # Ensure the number of channels is divisible by 8
-        assert s[1] % 8 == 0, "Number of channels must be divisible by 8 for 3D Squeeze."
-        z = z.view(s[0], s[1] // 8, 2, 2, 2, s[2], s[3], s[4])
-        z = z.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
-        z = z.view(s[0], s[1] // 8, 2 * s[2], 2 * s[3], 2 * s[4])
+        z = z.view(s[0], s[1], s[2] // 2, 2, s[3] // 2, 2, s[4] // 2, 2)
+        z = z.permute(0, 1, 3, 5, 7, 2, 4, 6).contiguous()
+        z = z.view(s[0], 8 * s[1], s[2] // 2, s[3] // 2, s[4] // 2)
         return z, log_det
 
     def inverse(self, z):
         log_det = 0
         s = z.size()
-        z = z.view(*s[:2], s[2] // 2, 2, s[3] // 2, 2, s[4] // 2, 2)
-        z = z.permute(0, 1, 3, 6, 2, 4, 7, 5).contiguous()
-        z = z.view(s[0], 8 * s[1], s[2] // 2, s[3] // 2, s[4] // 2)
+        z = z.view(s[0], s[1] // 8, 2, 2, 2, s[2], s[3], s[4])
+        z = z.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+        z = z.view(s[0], s[1] // 8, 2 * s[2], 2 * s[3], 2 * s[4])
         return z, log_det
+    
