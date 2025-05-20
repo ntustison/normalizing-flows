@@ -103,7 +103,7 @@ class ConvNet3d(nn.Module):
                 conv.weight.data.normal_(mean=0.0, std=weight_std)
             net.append(conv)
             if actnorm:
-                net.append(utils.ActNorm((channels[i + 1],) + (1, 1)))
+                net.append(utils.ActNorm((channels[i + 1],) + (1, 1, 1)))
             net.append(nn.LeakyReLU(leaky))
         i = len(kernel_size)
         net.append(
