@@ -230,6 +230,111 @@ class CoreTest(unittest.TestCase):
                 assert log_p.shape == (batch_size, num_samples)
                 assert log_q.shape == (batch_size, num_samples)
 
+    def test_msf_glow_2d(self):
+        # Configuration
+        channels = 1
+        spatial_dims = (64, 64)
+        input_shape = (channels, *spatial_dims)
+        batch_size = 16
+
+        # Dummy 2D input
+        x = torch.randn(batch_size, channels, *spatial_dims)
+
+        L = 3  # Number of levels
+        K = 2  # Number of GlowBlocks per level
+        hidden_channels = 64
+        split_mode = 'channel'
+        scale = True
+
+        # Containers
+        q0 = []
+        flows = []
+        merges = []
+
+        # Build flow levels
+        for i in range(L):
+            flows_ = []
+            number_of_channels = channels * 2 ** (L + 1 - i)
+            for j in range(K):
+                flows_ += [GlowBlock2d(number_of_channels, hidden_channels,
+                                       split_mode=split_mode, scale=scale)]
+            flows_ += [Squeeze2d()]
+            flows += [flows_]
+            if i > 0:
+                merges += [Merge()]
+                latent_shape = (number_of_channels // 2, 
+                                input_shape[1] // 2 ** (L - i), 
+                                input_shape[2] // 2 ** (L - i))
+            else:
+                latent_shape = (number_of_channels, 
+                                input_shape[1] // 2 ** L, 
+                                input_shape[2] // 2 ** L)                
+            q0 += [DiagGaussian(latent_shape)]
+
+        # Construct model
+        model = MultiscaleFlow(q0=q0, flows=flows, merges=merges)
+
+        # Run test round-trip
+        with torch.no_grad():
+            z, log_det = model.inverse_and_log_det(x)
+            x_recon, _ = model.forward_and_log_det(z)
+            is_close = torch.allclose(x, x_recon, atol=1e-4)
+            assert is_close
+
+
+    def test_msf_glow_3d(self):
+        # Configuration
+        channels = 1
+        spatial_dims = (64, 64, 64)
+        input_shape = (channels, *spatial_dims)
+        batch_size = 16
+
+        # Dummy 3D input
+        x = torch.randn(batch_size, channels, *spatial_dims)
+
+        L = 3  # Number of levels
+        K = 2  # Number of GlowBlocks per level
+        hidden_channels = 64
+        split_mode = 'channel'
+        scale = True
+
+        # Containers
+        q0 = []
+        flows = []
+        merges = []
+
+        # Build flow levels (3D)
+        for i in range(L):
+            flows_ = []
+            number_of_channels = channels * 2 ** (2 * (L - i) + 1)   
+            for j in range(K):
+                flows_ += [GlowBlock3d(number_of_channels, hidden_channels,
+                                       split_mode=split_mode, scale=scale)]
+            flows_ += [Squeeze3d()]
+            flows += [flows_]
+
+            if i > 0:
+                merges += [Merge()]
+                latent_shape = (number_of_channels // 2,
+                                input_shape[1] // 2 ** (L - i),
+                                input_shape[2] // 2 ** (L - i),
+                                input_shape[3] // 2 ** (L - i))
+            else:
+                latent_shape = (number_of_channels,
+                                input_shape[1] // 2 ** L,
+                                input_shape[2] // 2 ** L,
+                                input_shape[3] // 2 ** L)
+            q0 += [DiagGaussian(latent_shape)]
+
+        # Construct model
+        model = MultiscaleFlow(q0=q0, flows=flows, merges=merges)
+
+        # Run test round-trip
+        with torch.no_grad():
+            z, log_det = model.inverse_and_log_det(x)
+            x_recon, _ = model.forward_and_log_det(z)
+            is_close = torch.allclose(x, x_recon, atol=1e-4)
+            assert is_close
 
 if __name__ == "__main__":
     unittest.main()
