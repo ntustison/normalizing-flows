@@ -7,25 +7,12 @@ from .base import Flow
 
 # Flow layers to reshape the latent features
 
-
 class Split(Flow):
     """
     Split features into two sets
     """
 
     def __init__(self, mode="channel"):
-        """Constructor
-
-        The splitting mode can be:
-
-        - channel: Splits first feature dimension, usually channels, into two halfs
-        - channel_inv: Same as channel, but with z1 and z2 flipped
-        - checkerboard: Splits features using a checkerboard pattern (last feature dimension must be even)
-        - checkerboard_inv: Same as checkerboard, but with inverted coloring
-
-        Args:
-         mode: splitting mode
-        """
         super().__init__()
         self.mode = mode
 
@@ -86,6 +73,7 @@ class Split(Flow):
         log_det = 0
         return z, log_det
 
+
 class Merge(Split):
     """
     Same as Split but with forward and backward pass interchanged
@@ -95,21 +83,21 @@ class Merge(Split):
         super().__init__(mode)
 
     def forward(self, z):
-        return super().inverse(z)
+        z_out, log_det = super().inverse(z)
+        return z_out, log_det
 
     def inverse(self, z):
-        return super().forward(z)
+        z_out, log_det = super().forward(z)
+        return z_out, log_det
 
 
 class Squeeze2d(Flow):
     """
-    Squeeze operation of multi-scale architecture, RealNVP or Glow paper
+    Squeeze operation of multi-scale architecture (RealNVP / Glow),
+    which trades spatial resolution for more channels.
     """
 
     def __init__(self):
-        """
-        Constructor
-        """
         super().__init__()
 
     def forward(self, z):
@@ -123,7 +111,7 @@ class Squeeze2d(Flow):
     def inverse(self, z):
         log_det = 0
         s = z.size()
-        z = z.view(*s[:2], s[2] // 2, 2, s[3] // 2, 2)
+        z = z.view(s[0], s[1], s[2] // 2, 2, s[3] // 2, 2)
         z = z.permute(0, 1, 3, 5, 2, 4).contiguous()
         z = z.view(s[0], 4 * s[1], s[2] // 2, s[3] // 2)
         return z, log_det
@@ -142,16 +130,16 @@ class Squeeze3d(Flow):
     def forward(self, z):
         log_det = 0
         s = z.size()
-        z = z.view(s[0], s[1], s[2] // 2, 2, s[3] // 2, 2, s[4] // 2, 2)
-        z = z.permute(0, 1, 3, 5, 7, 2, 4, 6).contiguous()
-        z = z.view(s[0], 8 * s[1], s[2] // 2, s[3] // 2, s[4] // 2)
+        z = z.view(s[0], s[1] // 8, 2, 2, 2, s[2], s[3], s[4])
+        z = z.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+        z = z.view(s[0], s[1] // 8, s[2] * 2, s[3] * 2, s[4] * 2)
         return z, log_det
 
     def inverse(self, z):
         log_det = 0
         s = z.size()
-        z = z.view(s[0], s[1] // 8, 2, 2, 2, s[2], s[3], s[4])
-        z = z.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
-        z = z.view(s[0], s[1] // 8, 2 * s[2], 2 * s[3], 2 * s[4])
+        z = z.view(s[0], s[1], s[2] // 2, 2, s[3] // 2, 2, s[4] // 2, 2)
+        z = z.permute(0, 1, 3, 5, 7, 2, 4, 6).contiguous()
+        z = z.view(s[0], 8 * s[1], s[2] // 2, s[3] // 2, s[4] // 2)
         return z, log_det
     

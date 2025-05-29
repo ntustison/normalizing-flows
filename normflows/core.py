@@ -511,18 +511,23 @@ class MultiscaleFlow(nn.Module):
             Observed variable x, log determinant of Jacobian
         """
         log_det = torch.zeros(len(z[0]), dtype=z[0].dtype, device=z[0].device)
-        for i in range(len(self.q0)):
+
+        for i in range(self.num_levels):
+
             if i == 0:
                 z_ = z[0]
             else:
                 z_, log_det_ = self.merges[i - 1]([z_, z[i]])
                 log_det += log_det_
-            for flow in self.flows[i]:
+
+            for j, flow in enumerate(self.flows[i]):
                 z_, log_det_ = flow(z_)
                 log_det += log_det_
+
         if self.transform is not None:
             z_, log_det_ = self.transform(z_)
             log_det += log_det_
+
         return z_, log_det
 
     def inverse_and_log_det(self, x):
@@ -535,19 +540,24 @@ class MultiscaleFlow(nn.Module):
             List of latent variables z, log determinant of Jacobian
         """
         log_det = torch.zeros(len(x), dtype=x.dtype, device=x.device)
+
         if self.transform is not None:
             x, log_det_ = self.transform.inverse(x)
             log_det += log_det_
-        z = [None] * len(self.q0)
-        for i in range(len(self.q0) - 1, -1, -1):
-            for flow in reversed(self.flows[i]):
+
+        z = [None] * self.num_levels
+
+        for i in range(self.num_levels - 1, -1, -1):
+            for j, flow in enumerate(reversed(self.flows[i])):
                 x, log_det_ = flow.inverse(x)
                 log_det += log_det_
+
             if i == 0:
                 z[i] = x
             else:
                 [x, z[i]], log_det_ = self.merges[i - 1].inverse(x)
                 log_det += log_det_
+
         return z, log_det
 
     def sample(self, num_samples=1, y=None, temperature=None):
@@ -563,7 +573,7 @@ class MultiscaleFlow(nn.Module):
         """
         if temperature is not None:
             self.set_temperature(temperature)
-        for i in range(len(self.q0)):
+        for i in range(self.num_levels):
             if self.class_cond:
                 z_, log_q_ = self.q0[i](num_samples, y)
             else:
@@ -600,7 +610,7 @@ class MultiscaleFlow(nn.Module):
         if self.transform is not None:
             z, log_det = self.transform.inverse(z)
             log_q += log_det
-        for i in range(len(self.q0) - 1, -1, -1):
+        for i in range(self.num_levels - 1, -1, -1):
             for j in range(len(self.flows[i]) - 1, -1, -1):
                 z, log_det = self.flows[i][j].inverse(z)
                 log_q += log_det
