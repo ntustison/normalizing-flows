@@ -77,15 +77,10 @@ class DiagGaussian(BaseDistribution):
             self.register_buffer("log_scale", torch.zeros(1, *self.shape))
         self.temperature = None  # Temperature parameter for annealed sampling
 
-    def forward(self, num_samples=1, context=None, eps=None):
-        if eps is None:
-            eps = torch.randn(
-                (num_samples,) + self.shape, dtype=self.loc.dtype, device=self.loc.device
-            )
-        else:
-            # Make sure eps has correct shape and device
-            if eps.shape != (num_samples,) + self.shape:
-                raise ValueError(f"Expected eps shape {(num_samples,) + self.shape}, got {eps.shape}")
+    def forward(self, num_samples=1, context=None):
+        eps = torch.randn(
+            (num_samples,) + self.shape, dtype=self.loc.dtype, device=self.loc.device
+        )
         if self.temperature is None:
             log_scale = self.log_scale
         else:
