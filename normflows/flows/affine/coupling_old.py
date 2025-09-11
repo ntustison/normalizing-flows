@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from torch import nn
@@ -6,37 +5,6 @@ from torch import nn
 from ..base import Flow, zero_log_det_like_z
 from ..reshape import Split, Merge
 
-# -----------------------------------------------------------------------------
-# Small helpers used by stabilized heads (kept local to this file)
-# -----------------------------------------------------------------------------
-
-def _last_affine(module: nn.Module | None):
-    if module is None or not isinstance(module, nn.Module):
-        return None
-    last = None
-    for m in module.modules():
-        if isinstance(m, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-            last = m
-    return last
-
-
-def _zero_init_last_linear_or_conv(module: nn.Module | None):
-    last = _last_affine(module)
-    if last is not None:
-        nn.init.zeros_(last.weight)
-        if last.bias is not None:
-            nn.init.zeros_(last.bias)
-
-
-def _apply_spectral_norm_to_last(module: nn.Module | None):
-    last = _last_affine(module)
-    if last is not None:
-        nn.utils.spectral_norm(last)
-
-
-# -----------------------------------------------------------------------------
-# Affine flows (unchanged behavior by default)
-# -----------------------------------------------------------------------------
 
 class AffineConstFlow(Flow):
     """
@@ -98,8 +66,8 @@ class CCAffineConst(Flow):
         self.shape = shape
         self.s = nn.Parameter(torch.zeros(shape)[None])
         self.t = nn.Parameter(torch.zeros(shape)[None])
-        self.s_cc = nn.Parameter(torch.zeros(num_classes, int(np.prod(shape))))
-        self.t_cc = nn.Parameter(torch.zeros(num_classes, int(np.prod(shape))))
+        self.s_cc = nn.Parameter(torch.zeros(num_classes, np.prod(shape)))
+        self.t_cc = nn.Parameter(torch.zeros(num_classes, np.prod(shape)))
         self.n_dim = self.s.dim()
         self.batch_dims = torch.nonzero(
             torch.tensor(self.s.shape) == 1, as_tuple=False
@@ -133,33 +101,33 @@ class AffineCoupling(Flow):
     Affine Coupling layer as introduced RealNVP paper, see arXiv: 1605.08803
     """
 
-    def __init__(self, param_map, scale=True, scale_map="exp", s_cap=None):
+    def __init__(self, param_map, scale=True, scale_map="exp"):
         """Constructor
 
         Args:
           param_map: Maps features to shift and scale parameter (if applicable)
           scale: Flag whether scale shall be applied
-          scale_map: Map to be applied to the scale parameter, can be 'exp' as in RealNVP or 'sigmoid' as in Glow,
-                     'sigmoid_inv' uses multiplicative sigmoid scale when sampling from the model
-          s_cap: Optional symmetric cap for scale_ via tanh clamp (stability); if None, no clamp applied.
+          scale_map: Map to be applied to the scale parameter, can be 'exp' as in RealNVP or 'sigmoid' as in Glow, 'sigmoid_inv' uses multiplicative sigmoid scale when sampling from the model
         """
         super().__init__()
         self.add_module("param_map", param_map)
         self.scale = scale
         self.scale_map = scale_map
-        self.s_cap = s_cap
-
-    def _bound(self, s_raw):
-        if self.s_cap is None:
-            return s_raw
-        return self.s_cap * torch.tanh(s_raw / self.s_cap)
 
     def forward(self, z):
+        """
+        z is a list of z1 and z2; ```z = [z1, z2]```
+        z1 is left constant and affine map is applied to z2 with parameters depending
+        on z1
+
+        Args:
+          z
+        """
         z1, z2 = z
         param = self.param_map(z1)
         if self.scale:
             shift = param[:, 0::2, ...]
-            scale_ = self._bound(param[:, 1::2, ...])
+            scale_ = param[:, 1::2, ...]
             if self.scale_map == "exp":
                 z2 = z2 * torch.exp(scale_) + shift
                 log_det = torch.sum(scale_, dim=list(range(1, shift.dim())))
@@ -183,7 +151,7 @@ class AffineCoupling(Flow):
         param = self.param_map(z1)
         if self.scale:
             shift = param[:, 0::2, ...]
-            scale_ = self._bound(param[:, 1::2, ...])
+            scale_ = param[:, 1::2, ...]
             if self.scale_map == "exp":
                 z2 = (z2 - shift) * torch.exp(-scale_)
                 log_det = -torch.sum(scale_, dim=list(range(1, shift.dim())))
@@ -203,106 +171,61 @@ class AffineCoupling(Flow):
         return [z1, z2], log_det
 
 
-# -----------------------------------------------------------------------------
-# Stabilized MaskedAffineFlow (drop-in compatible, with extra kwargs)
-# -----------------------------------------------------------------------------
-
 class MaskedAffineFlow(Flow):
     """RealNVP as introduced in [arXiv: 1605.08803](https://arxiv.org/abs/1605.08803)
 
     Masked affine flow:
 
-        f(z) = b * z + (1 - b) * (z * exp(s(b * z)) + t)
+    ```
+    f(z) = b * z + (1 - b) * (z * exp(s(b * z)) + t)
+    ```
 
     - class AffineHalfFlow(Flow): is MaskedAffineFlow with alternating bit mask
     - NICE is AffineFlow with only shifts (volume preserving)
-
-    This implementation adds *bounded* log-scales and safe numeric handling.
     """
 
-    def __init__(
-        self,
-        b,
-        t=None,
-        s=None,
-        *,
-        s_cap: float | None = 2.0,
-        sanitize_nonfinite: bool = True,
-        zero_init_heads: bool = False,
-        spectral_norm_last: bool = False,
-    ):
-        """Constructor (drop-in: b, t=None, s=None; extra kwargs are optional)
+    def __init__(self, b, t=None, s=None):
+        """Constructor
 
         Args:
           b: mask for features, i.e. tensor of same size as latent data point filled with 0s and 1s
           t: translation mapping, i.e. neural network, where first input dimension is batch dim, if None no translation is applied
           s: scale mapping, i.e. neural network, where first input dimension is batch dim, if None no scale is applied
-          s_cap: symmetric cap for s via tanh clamp (set None to disable). Typical values 1.5–2.0.
-          sanitize_nonfinite: if True, replaces NaN/Inf from s/t with 0 (neutral) before use.
-          zero_init_heads: if True, zero-inits the last linear/conv of s and t heads (identity start).
-          spectral_norm_last: if True, applies spectral_norm to the last linear/conv of s and t heads.
         """
         super().__init__()
-        # ensure float mask and keep a broadcastable buffer
-        b = b.float()
-        self.register_buffer("b", b.view(1, *b.size()))
+        self.b_cpu = b.view(1, *b.size())
+        self.register_buffer("b", self.b_cpu)
 
         if s is None:
-            self.s = torch.zeros_like  # type: ignore[assignment]
+            self.s = torch.zeros_like
         else:
             self.add_module("s", s)
 
         if t is None:
-            self.t = torch.zeros_like  # type: ignore[assignment]
+            self.t = torch.zeros_like
         else:
             self.add_module("t", t)
 
-        self.s_cap = s_cap
-        self.sanitize_nonfinite = sanitize_nonfinite
-
-        # Optional head conditioning for stability
-        if zero_init_heads:
-            _zero_init_last_linear_or_conv(getattr(self, "s", None))
-            _zero_init_last_linear_or_conv(getattr(self, "t", None))
-        if spectral_norm_last:
-            _apply_spectral_norm_to_last(getattr(self, "s", None))
-            _apply_spectral_norm_to_last(getattr(self, "t", None))
-
-    # ---- internals ---------------------------------------------------------
-    def _bound_scale(self, s_raw):
-        if self.s_cap is None:
-            return s_raw
-        # Smooth symmetric clamp so exp(s) never explodes
-        return self.s_cap * torch.tanh(s_raw / self.s_cap)
-
-    def _safe(self, x):
-        if not self.sanitize_nonfinite:
-            return x
-        return torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-
-    # ---- forward/inverse ---------------------------------------------------
     def forward(self, z):
-        b = self.b.to(dtype=z.dtype, device=z.device)
-        z_masked = b * z
-        scale_raw = self.s(z_masked)
-        trans_raw = self.t(z_masked)
-        s = self._safe(self._bound_scale(scale_raw))
-        t = self._safe(trans_raw)
-        invb = 1.0 - b
-        z_ = z_masked + invb * (z * torch.exp(s) + t)
-        log_det = torch.sum(invb * s, dim=list(range(1, b.dim())))
+        z_masked = self.b * z
+        scale = self.s(z_masked)
+        nan = torch.tensor(np.nan, dtype=z.dtype, device=z.device)
+        scale = torch.where(torch.isfinite(scale), scale, nan)
+        trans = self.t(z_masked)
+        trans = torch.where(torch.isfinite(trans), trans, nan)
+        z_ = z_masked + (1 - self.b) * (z * torch.exp(scale) + trans)
+        log_det = torch.sum((1 - self.b) * scale, dim=list(range(1, self.b.dim())))
         return z_, log_det
 
     def inverse(self, z):
-        b = self.b.to(dtype=z.dtype, device=z.device)
-        z_masked = b * z
-        scale_raw = self.s(z_masked)
-        trans_raw = self.t(z_masked)
-        s = self._safe(self._bound_scale(scale_raw))
-        t = self._safe(trans_raw)
-        invb = 1.0 - b
-        z_ = z_masked + invb * (z - t) * torch.exp(-s)
-        log_det = -torch.sum(invb * s, dim=list(range(1, b.dim())))
+        z_masked = self.b * z
+        scale = self.s(z_masked)
+        nan = torch.tensor(np.nan, dtype=z.dtype, device=z.device)
+        scale = torch.where(torch.isfinite(scale), scale, nan)
+        trans = self.t(z_masked)
+        trans = torch.where(torch.isfinite(trans), trans, nan)
+        z_ = z_masked + (1 - self.b) * (z - trans) * torch.exp(-scale)
+        log_det = -torch.sum((1 - self.b) * scale, dim=list(range(1, self.b.dim())))
         return z_, log_det
 
 
@@ -311,7 +234,7 @@ class AffineCouplingBlock(Flow):
     Affine Coupling layer including split and merge operation
     """
 
-    def __init__(self, param_map, scale=True, scale_map="exp", split_mode="channel", s_cap=None):
+    def __init__(self, param_map, scale=True, scale_map="exp", split_mode="channel"):
         """Constructor
 
         Args:
@@ -319,14 +242,13 @@ class AffineCouplingBlock(Flow):
           scale: Flag whether scale shall be applied
           scale_map: Map to be applied to the scale parameter, can be 'exp' as in RealNVP or 'sigmoid' as in Glow
           split_mode: Splitting mode, for possible values see Split class
-          s_cap: optional tanh clamp for the internal AffineCoupling's scale head
         """
         super().__init__()
         self.flows = nn.ModuleList([])
         # Split layer
         self.flows += [Split(split_mode)]
-        # Affine coupling layer (optionally bounded)
-        self.flows += [AffineCoupling(param_map, scale, scale_map, s_cap=s_cap)]
+        # Affine coupling layer
+        self.flows += [AffineCoupling(param_map, scale, scale_map)]
         # Merge layer
         self.flows += [Merge(split_mode)]
 
