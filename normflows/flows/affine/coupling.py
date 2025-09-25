@@ -171,6 +171,11 @@ class AffineCoupling(Flow):
                 scale = torch.sigmoid(scale_ + 2)
                 z2 = z2 * scale + shift
                 log_det = torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
+            elif self.scale_map == "tanh":
+                # "tanh" here = tanh-bounded *log-scale*, then exp()
+                # scale_ already bounded to [-s_cap, s_cap] by self._bound(...)
+                z2 = z2 * torch.exp(scale_) + shift
+                log_det = torch.sum(scale_, dim=list(range(1, shift.dim())))
             else:
                 raise NotImplementedError("This scale map is not implemented.")
         else:
@@ -195,6 +200,10 @@ class AffineCoupling(Flow):
                 scale = torch.sigmoid(scale_ + 2)
                 z2 = (z2 - shift) / scale
                 log_det = -torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
+            elif self.scale_map == "tanh":
+                # inverse of tanh-bounded log-scale: multiply by exp(-scale_)
+                z2 = (z2 - shift) * torch.exp(-scale_)
+                log_det = -torch.sum(scale_, dim=list(range(1, shift.dim())))
             else:
                 raise NotImplementedError("This scale map is not implemented.")
         else:
@@ -311,7 +320,7 @@ class AffineCouplingBlock(Flow):
     Affine Coupling layer including split and merge operation
     """
 
-    def __init__(self, param_map, scale=True, scale_map="exp", split_mode="channel", s_cap=None):
+    def __init__(self, param_map, scale=True, scale_map="tanh", split_mode="channel", s_cap=3.0):
         """Constructor
 
         Args:

@@ -15,12 +15,13 @@ class GlowBlock2d(Flow):
         channels,
         hidden_channels,
         scale=True,
-        scale_map="sigmoid",
+        scale_map="tanh",
         split_mode="channel",
-        leaky=0.0,
+        leaky=0.1,
         init_zeros=True,
         use_lu=True,
-        net_actnorm=False,
+        net_actnorm=True,
+        s_cap=3.0
     ):
         super().__init__()
         self.flows = nn.ModuleList([])
@@ -44,13 +45,11 @@ class GlowBlock2d(Flow):
         param_map = nets.ConvNet2d(
             channels_, kernel_size, leaky, init_zeros, actnorm=net_actnorm
         )
- 
-        self.flows.append(AffineCouplingBlock(param_map, scale, scale_map, split_mode))
-
-        if channels > 1:
-            self.flows.append(Invertible1x1Conv(channels, use_lu))
 
         self.flows.append(ActNorm((channels,) + (1, 1)))
+        if channels > 1:
+            self.flows.append(Invertible1x1Conv(channels, use_lu))
+        self.flows.append(AffineCouplingBlock(param_map, scale, scale_map, split_mode, s_cap))
 
     def forward(self, z):
         log_det_tot = torch.zeros(z.shape[0], dtype=z.dtype, device=z.device)
@@ -86,12 +85,13 @@ class GlowBlock3d(Flow):
         channels,
         hidden_channels,
         scale=True,
-        scale_map="sigmoid",
+        scale_map="tanh",
         split_mode="channel",
-        leaky=0.0,
+        leaky=0.1,
         init_zeros=True,
         use_lu=True,
-        net_actnorm=False,
+        net_actnorm=True,
+        s_cap=3.0
     ):
         """Constructor
 
@@ -125,12 +125,11 @@ class GlowBlock3d(Flow):
         param_map = nets.ConvNet3d(
             channels_, kernel_size, leaky, init_zeros, actnorm=net_actnorm
         )
-        self.flows += [AffineCouplingBlock(param_map, scale, scale_map, split_mode)]
-        # Invertible 1x1x1 convolution
+
+        self.flows += [ActNorm((channels,) + (1, 1, 1))]
         if channels > 1:
             self.flows += [Invertible1x1x1Conv(channels, use_lu)]
-        # Activation normalization
-        self.flows += [ActNorm((channels,) + (1, 1))]
+        self.flows += [AffineCouplingBlock(param_map, scale, scale_map, split_mode, s_cap)]
 
     def forward(self, z):
         log_det_tot = torch.zeros(z.shape[0], dtype=z.dtype, device=z.device)
