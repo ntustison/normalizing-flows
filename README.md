@@ -1,12 +1,7 @@
-# normflows (fork)
+# normflows
 
 A PyTorch package for discrete normalizing flows (NICE, Real NVP, Glow, Neural Spline Flows, etc.).
-This repository is a **fork** of the original project by Vincent Stimper and collaborators at
-https://github.com/VincentStimper/normalizing-flows. It keeps the import path **`normflows`** and
-adapts the project to a modern `src/` layout with a simplified test and packaging setup.
-
-> If you are looking for the canonical upstream documentation and examples, please refer to the
-> original project’s site: https://vincentstimper.github.io/normalizing-flows/
+This repository is a **fork** of the [original project](https://github.com/VincentStimper/normalizing-flows). 
 
 ## Installation
 
@@ -45,20 +40,13 @@ loss.backward()
 
 ## Documentation
 
-For in-depth API docs and background, use the upstream documentation:
-https://vincentstimper.github.io/normalizing-flows/
+* [Upstream documentation](https://vincentstimper.github.io/normalizing-flows/)
 
 ## Attribution
 
 This is a derivative work based on the upstream project:
 - **Original repository:** https://github.com/VincentStimper/normalizing-flows
 - **License:** MIT (see `LICENSE` in this repository and upstream)
-- **Upstream authors:** Vincent Stimper et al.
-
-This fork focuses on:
-- `src/`/`tests/` restructure for packaging and CI.
-- Modern `pyproject.toml` build config.
-- Stability options in Glow-style flows (e.g., optional `tanh`-capped scales, gradient clipping, sentry checks).
 
 ## Citation
 
@@ -82,12 +70,4 @@ If you use `normflows`, please cite the corresponding paper:
   url = {https://doi.org/10.21105/joss.05361},
   year = {2023}
 }
-```
-
-## Contributing
-
-Pull requests are welcome. Please add tests for any new functionality and run:
-
-```bash
-pytest -q
 ```
