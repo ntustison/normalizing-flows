@@ -46,7 +46,7 @@ include = ["normflows*"]
 normflows = ["py.typed"]
 
 [tool.setuptools.dynamic]
-version = { attr = "normflows.__version__" }
+version = { attr = "normflows._version.__version__" }
 dependencies = { file = ["requirements.txt"] }
 optional-dependencies.examples = { file = ["requirements_examples.txt"] }
 
