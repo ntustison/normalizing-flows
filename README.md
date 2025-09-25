@@ -1,7 +1,7 @@
 # normflows
 
 A PyTorch package for discrete normalizing flows (NICE, Real NVP, Glow, Neural Spline Flows, etc.).
-This repository is a **fork** of the [original project](https://github.com/VincentStimper/normalizing-flows). 
+[Original](https://github.com/VincentStimper/normalizing-flows). 
 
 ## Installation
 
@@ -11,7 +11,7 @@ Requires Python ≥ 3.10 and a working PyTorch installation (GPU optional).
 pip install -e .
 ```
 
-To run example notebooks in this fork (if you keep them), install extras:
+To run example notebooks:
 
 ```bash
 pip install -e .[examples]
@@ -40,13 +40,7 @@ loss.backward()
 
 ## Documentation
 
-* [Upstream documentation](https://vincentstimper.github.io/normalizing-flows/)
-
-## Attribution
-
-This is a derivative work based on the upstream project:
-- **Original repository:** https://github.com/VincentStimper/normalizing-flows
-- **License:** MIT (see `LICENSE` in this repository and upstream)
+* [Original documentation](https://vincentstimper.github.io/normalizing-flows/)
 
 ## Citation
 
