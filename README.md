@@ -1,7 +1,7 @@
 # normflows
 
-A PyTorch package for discrete normalizing flows (NICE, Real NVP, Glow, Neural Spline Flows, etc.).
-[Original](https://github.com/VincentStimper/normalizing-flows). 
+A PyTorch package (fork [source](https://github.com/VincentStimper/normalizing-flows)) 
+for discrete normalizing flows (NICE, Real NVP, Glow, Neural Spline Flows, etc.).
 
 ## Installation
 
