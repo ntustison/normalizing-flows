@@ -205,7 +205,7 @@ class AffineCoupling(Flow):
                 z2 = (z2 - shift) * torch.exp(-scale_)
                 log_det = -torch.sum(scale_, dim=list(range(1, shift.dim())))
             else:
-                raise NotImplementedError("This scale map is not implemented.")
+                raise NotImplementedError("The scale map" + self.scale_map + "is not implemented.")
         else:
             z2 = z2 - param
             log_det = zero_log_det_like_z(z2)
