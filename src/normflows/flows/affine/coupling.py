@@ -314,7 +314,6 @@ class MaskedAffineFlow(Flow):
         log_det = -torch.sum(invb * s, dim=list(range(1, b.dim())))
         return z_, log_det
 
-
 class AffineCouplingBlock(Flow):
     """
     Affine Coupling layer including split and merge operation
