@@ -5,6 +5,10 @@ import numpy as np
 from . import distributions
 from . import utils
 
+from math import prod
+
+import os
+
 
 class NormalizingFlow(nn.Module):
     """
@@ -522,7 +526,7 @@ class MultiscaleFlow(nn.Module):
                 z_, log_det_ = self.merges[i - 1]([z_, z[i]])
                 log_det += log_det_
 
-            for j, flow in enumerate(self.flows[i]):
+            for _, flow in enumerate(self.flows[i]):
                 z_, log_det_ = flow(z_)
                 log_det += log_det_
 
@@ -594,33 +598,29 @@ class MultiscaleFlow(nn.Module):
         z_list = []
         log_q = torch.zeros(num_samples, device=dev, dtype=dty)
 
-        for base, (Ci, Hi, Wi) in zip(bases, latent_shapes):
-            try:
-                # Many normflows bases are callable: base(N, y) -> (z, log_q)
-                if self.class_cond:
-                    z_i, log_q_i = base(num_samples, y)
-                else:
-                    z_i, log_q_i = base(num_samples)
+        for lvl, (base, event_shape) in enumerate(zip(bases, latent_shapes)):
+            event_shape = tuple(event_shape)             # e.g., (C,H,W) or (C,D,H,W)
+            need        = (num_samples, *event_shape)
+            flat_event  = prod(event_shape)
 
-                # If flattened, reshape to spatial; otherwise fallback to N(0,1) with correct shape
-                if z_i.ndim == 2 and z_i.shape[1] == Ci * Hi * Wi:
-                    z_i = z_i.view(num_samples, Ci, Hi, Wi)
-                elif z_i.ndim != 4 or z_i.shape[1:] != (Ci, Hi, Wi):
-                    z_i = torch.randn((num_samples, Ci, Hi, Wi), device=dev, dtype=dty)
-                    try:
-                        log_q_i = base.log_prob(z_i, y) if self.class_cond else base.log_prob(z_i)
-                    except Exception:
-                        log_q_i = torch.zeros(num_samples, device=dev, dtype=dty)
-            except Exception:
-                # Defensive fallback if base(...) fails
-                z_i = torch.randn((num_samples, Ci, Hi, Wi), device=dev, dtype=dty)
-                try:
-                    log_q_i = base.log_prob(z_i, y) if self.class_cond else base.log_prob(z_i)
-                except Exception:
-                    log_q_i = torch.zeros(num_samples, device=dev, dtype=dty)
+            if self.class_cond:
+                z_i, log_q_i = base(num_samples, y)
+            else:
+                z_i, log_q_i = base(num_samples)
+
+            ok = (z_i.dim() == len(event_shape)+1 and tuple(z_i.shape[1:]) == event_shape)
+            if not ok and (z_i.dim() == 2 and z_i.shape[1] == flat_event):
+                z_i = z_i.view(need)
+                ok = True
+
+            if not ok:
+                raise RuntimeError(
+                    f"q0[{lvl}] sample has shape {tuple(z_i.shape[1:])} but expected {event_shape}"
+                )
 
             z_list.append(z_i)
             log_q = log_q + log_q_i.to(device=dev, dtype=dty)
+
 
         # Reconstruct x using the graph (merges + flows) at the right spatial sizes
         x, log_det = self.forward_and_log_det(z_list)
