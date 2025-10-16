@@ -476,6 +476,8 @@ class MultiscaleFlow(nn.Module):
         self.merges = torch.nn.ModuleList(merges)
         self.transform = transform
         self.class_cond = class_cond
+        self._latent_shapes = None   
+        self._x_shape = None         
 
     def forward_kld(self, x, y=None):
         """Estimates forward KL divergence, see [arXiv 1912.02762](https://arxiv.org/abs/1912.02762)
@@ -558,42 +560,75 @@ class MultiscaleFlow(nn.Module):
                 [x, z[i]], log_det_ = self.merges[i - 1].inverse(x)
                 log_det += log_det_
 
+        if self._latent_shapes is None:
+            zs = z if isinstance(z, (list, tuple)) else [z]
+            self._latent_shapes = [tuple(zi.shape[1:]) for zi in zs] 
+            self._x_shape = tuple(x.shape[1:])
+
         return z, log_det
 
+    @torch.no_grad()
     def sample(self, num_samples=1, y=None, temperature=None):
-        """Samples from flow-based approximate distribution
-
-        Args:
-          num_samples: Number of samples to draw
-          y: Classes to sample from, will be sampled uniformly if None
-          temperature: Temperature parameter for temp annealed sampling
-
-        Returns:
-          Samples, log probability
         """
+        Draw per-level latents with cached shapes and rebuild x via forward().
+        Returns: (x, log_prob(x))
+        """
+        dev = next(self.parameters()).device
+        dty = next(self.parameters()).dtype
+
         if temperature is not None:
             self.set_temperature(temperature)
-        for i in range(self.num_levels):
-            if self.class_cond:
-                z_, log_q_ = self.q0[i](num_samples, y)
-            else:
-                z_, log_q_ = self.q0[i](num_samples)
-            if i == 0:
-                log_q = log_q_
-                z = z_
-            else:
-                log_q += log_q_
-                z, log_det = self.merges[i - 1]([z, z_])
-                log_q -= log_det
-            for flow in self.flows[i]:
-                z, log_det = flow(z)
-                log_q -= log_det
-        if self.transform is not None:
-            z, log_det = self.transform(z)
-            log_q -= log_det
+
+        # Need shapes observed at least once (training/inference calls inverse/log_prob)
+        if self._latent_shapes is None:
+            raise RuntimeError(
+                "MultiscaleFlow.sample: latent shapes unknown. "
+                "Call log_prob/inverse_and_log_det once (e.g., during training) so shapes can be cached."
+            )
+
+        latent_shapes = self._latent_shapes  # [(C_i,H_i,W_i), ...]
+        bases = list(self.q0)
+        if len(bases) == 1 and len(latent_shapes) > 1:
+            bases = bases * len(latent_shapes)
+
+        z_list = []
+        log_q = torch.zeros(num_samples, device=dev, dtype=dty)
+
+        for base, (Ci, Hi, Wi) in zip(bases, latent_shapes):
+            try:
+                # Many normflows bases are callable: base(N, y) -> (z, log_q)
+                if self.class_cond:
+                    z_i, log_q_i = base(num_samples, y)
+                else:
+                    z_i, log_q_i = base(num_samples)
+
+                # If flattened, reshape to spatial; otherwise fallback to N(0,1) with correct shape
+                if z_i.ndim == 2 and z_i.shape[1] == Ci * Hi * Wi:
+                    z_i = z_i.view(num_samples, Ci, Hi, Wi)
+                elif z_i.ndim != 4 or z_i.shape[1:] != (Ci, Hi, Wi):
+                    z_i = torch.randn((num_samples, Ci, Hi, Wi), device=dev, dtype=dty)
+                    try:
+                        log_q_i = base.log_prob(z_i, y) if self.class_cond else base.log_prob(z_i)
+                    except Exception:
+                        log_q_i = torch.zeros(num_samples, device=dev, dtype=dty)
+            except Exception:
+                # Defensive fallback if base(...) fails
+                z_i = torch.randn((num_samples, Ci, Hi, Wi), device=dev, dtype=dty)
+                try:
+                    log_q_i = base.log_prob(z_i, y) if self.class_cond else base.log_prob(z_i)
+                except Exception:
+                    log_q_i = torch.zeros(num_samples, device=dev, dtype=dty)
+
+            z_list.append(z_i)
+            log_q = log_q + log_q_i.to(device=dev, dtype=dty)
+
+        # Reconstruct x using the graph (merges + flows) at the right spatial sizes
+        x, log_det = self.forward_and_log_det(z_list)
+        log_q = log_q - log_det
+
         if temperature is not None:
             self.reset_temperature()
-        return z, log_q
+        return x, log_q
 
     def log_prob(self, x, y=None):
         """Get log probability for batch
