@@ -11,10 +11,6 @@ from .. import flows
 # Utilities
 # -----------------------------------------------------------------------------
 
-def _nan_to_num(x, val=0.0):
-    return torch.nan_to_num(x, nan=val, posinf=val, neginf=val)
-
-
 def _clamp_log_scale(log_scale, min_log=-5.0, max_log=5.0):
     # Hard clamp keeps sigma in [exp(min_log), exp(max_log)] ~ [6.7e-3, 148]
     if isinstance(log_scale, (float, int)):
@@ -27,11 +23,6 @@ def _apply_temperature(log_scale, temperature):
         return log_scale
     # Multiplicative temperature on sigma => additive on log_sigma
     return log_scale + float(np.log(temperature))
-
-
-def _batch_flatten_starting_from(x, dim_from):
-    return x.view(x.shape[0], -1)
-
 
 # -----------------------------------------------------------------------------
 # Base API
@@ -397,6 +388,7 @@ class GlowBase(BaseDistribution):
 
     def log_prob(self, z, y=None):
         loc, log_scale = self._prep_params(y if self.class_cond else None)
+
         inv_sigma = torch.exp(-log_scale)
         eps = (z - loc) * inv_sigma
         log_p = (
