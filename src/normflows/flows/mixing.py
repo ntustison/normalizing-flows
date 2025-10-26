@@ -53,16 +53,18 @@ class Permute(Flow):
         log_det = torch.zeros(len(z), device=z.device)
         return z, log_det
 
+
 class Invertible1x1Conv(Flow):
     """
     Invertible 1x1 convolution introduced in the Glow paper.
     Assumes 4D input/output tensors in NCHW format.
     """
 
-    def __init__(self, num_channels, use_lu=False):
+    def __init__(self, num_channels, use_lu=False, s_cap=2.0):
         super().__init__()
         self.num_channels = num_channels
         self.use_lu = use_lu
+        self.s_cap = float(s_cap)
 
         Q, _ = torch.linalg.qr(torch.randn(self.num_channels, self.num_channels))
 
@@ -71,7 +73,7 @@ class Invertible1x1Conv(Flow):
                 LU, pivots, info = torch.linalg.lu_factor_ex(Q)
                 P, L, U = torch.lu_unpack(LU, pivots)
             except AttributeError:  # older PyTorch
-                LU, pivots = Q.lu()                   
+                LU, pivots = Q.lu()
                 P, L, U = torch.lu_unpack(LU, pivots)
             self.register_buffer("P", P)
             self.L = nn.Parameter(L)
@@ -83,11 +85,22 @@ class Invertible1x1Conv(Flow):
         else:
             self.W = nn.Parameter(Q)
 
+    # --- helper: bounded LU log-diagonal in fp32 ---
+    def _bounded_log_s32(self):
+        cap = self.s_cap
+        log_s32 = self.log_S.float()
+        return cap * torch.tanh(log_s32 / cap)
+
     def _assemble_W(self, inverse=False):
         L = torch.tril(self.L, diagonal=-1) + self.eye
-        U = torch.triu(self.U, diagonal=1) + torch.diag(self.sign_S * torch.exp(self.log_S))
+        # FP32-safe exp of bounded log-diagonal
+        log_s32 = self._bounded_log_s32()
+        with torch.amp.autocast('cuda', enabled=False):
+            s32 = torch.exp(log_s32)
+        U = torch.triu(self.U, diagonal=1) + torch.diag(self.sign_S * s32.to(self.U.dtype))
 
         if inverse:
+            # keep your existing double-precision inversion path
             if self.log_S.dtype == torch.float64:
                 L_inv = torch.inverse(L)
                 U_inv = torch.inverse(U)
@@ -102,29 +115,43 @@ class Invertible1x1Conv(Flow):
     def forward(self, z):
         if self.use_lu:
             W = self._assemble_W(inverse=True)
-            log_det = -torch.sum(self.log_S)
+            # logdet in FP32, multiply by spatial area
+            log_s32 = self._bounded_log_s32()
+            hw = z.size(2) * z.size(3)
+            log_det = (-log_s32.sum() * hw).to(z.dtype)
         else:
+            # compute slogdet in fp32 for numerical safety
+            W32 = self.W.float()
+            with torch.amp.autocast('cuda', enabled=False):
+                sign, logabsdet = torch.slogdet(W32)
+            hw = z.size(2) * z.size(3)
+            log_det = (-logabsdet * hw).to(z.dtype)
+            # build inverse weight, as in your original path
             W_dtype = self.W.dtype
             W = torch.inverse(self.W) if W_dtype == torch.float64 else torch.inverse(self.W.double()).type(W_dtype)
-            log_det = -torch.slogdet(self.W)[1]
 
-        W = W.view(self.num_channels, self.num_channels, 1, 1)
+        W = W.view(self.num_channels, self.num_channels, 1, 1).to(z.dtype)
         z_ = torch.nn.functional.conv2d(z, W)
-        log_det = log_det * z.size(2) * z.size(3)
         return z_, log_det
 
     def inverse(self, z):
         if self.use_lu:
             W = self._assemble_W()
-            log_det = torch.sum(self.log_S)
+            log_s32 = self._bounded_log_s32()
+            hw = z.size(2) * z.size(3)
+            log_det = (log_s32.sum() * hw).to(z.dtype)
         else:
             W = self.W
-            log_det = torch.slogdet(self.W)[1]
+            W32 = W.float()
+            with torch.amp.autocast('cuda', enabled=False):
+                sign, logabsdet = torch.slogdet(W32)
+            hw = z.size(2) * z.size(3)
+            log_det = (logabsdet * hw).to(z.dtype)
 
-        W = W.view(self.num_channels, self.num_channels, 1, 1)
+        W = W.view(self.num_channels, self.num_channels, 1, 1).to(z.dtype)
         z_ = torch.nn.functional.conv2d(z, W)
-        log_det = log_det * z.size(2) * z.size(3)
         return z_, log_det
+
 
 class Invertible1x1x1Conv(Flow):
     """
@@ -132,42 +159,41 @@ class Invertible1x1x1Conv(Flow):
     Assumes 5d input/output tensors of the form NCHWD
     """
 
-    def __init__(self, num_channels, use_lu=False):
-        """Constructor
-
-        Args:
-          num_channels: Number of channels of the data
-          use_lu: Flag whether to parametrize weights through the LU decomposition
-        """
+    def __init__(self, num_channels, use_lu=False, s_cap=2.0):
         super().__init__()
         self.num_channels = num_channels
         self.use_lu = use_lu
+        self.s_cap = float(s_cap)
+
         Q, _ = torch.linalg.qr(torch.randn(self.num_channels, self.num_channels))
         if use_lu:
             try:
                 LU, pivots, info = torch.linalg.lu_factor_ex(Q)
                 P, L, U = torch.lu_unpack(LU, pivots)
-            except AttributeError:  # older PyTorch
-                LU, pivots = Q.lu()                   
+            except AttributeError:
+                LU, pivots = Q.lu()
                 P, L, U = torch.lu_unpack(LU, pivots)
-            self.register_buffer("P", P)  # remains fixed during optimization
-            self.L = nn.Parameter(L)  # lower triangular portion
-            S = U.diag()  # "crop out" the diagonal to its own parameter
+            self.register_buffer("P", P)
+            self.L = nn.Parameter(L)
+            S = U.diag()
             self.register_buffer("sign_S", torch.sign(S))
             self.log_S = nn.Parameter(torch.log(torch.abs(S)))
-            self.U = nn.Parameter(
-                torch.triu(U, diagonal=1)
-            )  # "crop out" diagonal, stored in S
+            self.U = nn.Parameter(torch.triu(U, diagonal=1))
             self.register_buffer("eye", torch.diag(torch.ones(self.num_channels)))
         else:
             self.W = nn.Parameter(Q)
 
+    def _bounded_log_s32(self):
+        cap = self.s_cap
+        log_s32 = self.log_S.float()
+        return cap * torch.tanh(log_s32 / cap)
+
     def _assemble_W(self, inverse=False):
-        # assemble W from its components (P, L, U, S)
         L = torch.tril(self.L, diagonal=-1) + self.eye
-        U = torch.triu(self.U, diagonal=1) + torch.diag(
-            self.sign_S * torch.exp(self.log_S)
-        )
+        log_s32 = self._bounded_log_s32()
+        with torch.amp.autocast('cuda', enabled=False):
+            s32 = torch.exp(log_s32)
+        U = torch.triu(self.U, diagonal=1) + torch.diag(self.sign_S * s32.to(self.U.dtype))
         if inverse:
             if self.log_S.dtype == torch.float64:
                 L_inv = torch.inverse(L)
@@ -183,30 +209,41 @@ class Invertible1x1x1Conv(Flow):
     def forward(self, z):
         if self.use_lu:
             W = self._assemble_W(inverse=True)
-            log_det = -torch.sum(self.log_S)
+            log_s32 = self._bounded_log_s32()
+            hwd = z.size(2) * z.size(3) * z.size(4)
+            log_det = (-log_s32.sum() * hwd).to(z.dtype)
         else:
+            W32 = self.W.float()
+            with torch.amp.autocast('cuda', enabled=False):
+                sign, logabsdet = torch.slogdet(W32)
+            hwd = z.size(2) * z.size(3) * z.size(4)
+            log_det = (-logabsdet * hwd).to(z.dtype)
             W_dtype = self.W.dtype
             if W_dtype == torch.float64:
                 W = torch.inverse(self.W)
             else:
                 W = torch.inverse(self.W.double()).type(W_dtype)
-            W = W.view(*W.size(), 1, 1)
-            log_det = -torch.slogdet(self.W)[1]
-        W = W.view(self.num_channels, self.num_channels, 1, 1, 1)
+
+        W = W.view(self.num_channels, self.num_channels, 1, 1, 1).to(z.dtype)
         z_ = torch.nn.functional.conv3d(z, W)
-        log_det = log_det * z.size(2) * z.size(3) * z.size(4)
         return z_, log_det
 
     def inverse(self, z):
         if self.use_lu:
             W = self._assemble_W()
-            log_det = torch.sum(self.log_S)
+            log_s32 = self._bounded_log_s32()
+            hwd = z.size(2) * z.size(3) * z.size(4)
+            log_det = (log_s32.sum() * hwd).to(z.dtype)
         else:
             W = self.W
-            log_det = torch.slogdet(self.W)[1]
-        W = W.view(self.num_channels, self.num_channels, 1, 1, 1)
+            W32 = W.float()
+            with torch.amp.autocast('cuda', enabled=False):
+                sign, logabsdet = torch.slogdet(W32)
+            hwd = z.size(2) * z.size(3) * z.size(4)
+            log_det = (logabsdet * hwd).to(z.dtype)
+
+        W = W.view(self.num_channels, self.num_channels, 1, 1, 1).to(z.dtype)
         z_ = torch.nn.functional.conv3d(z, W)
-        log_det = log_det * z.size(2) * z.size(3) * z.size(4)
         return z_, log_det
 
 class InvertibleAffine(Flow):
