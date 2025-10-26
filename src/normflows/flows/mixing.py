@@ -60,7 +60,7 @@ class Invertible1x1Conv(Flow):
     Assumes 4D input/output tensors in NCHW format.
     """
 
-    def __init__(self, num_channels, use_lu=False, s_cap=2.0):
+    def __init__(self, num_channels, use_lu=False, s_cap=2.5):
         super().__init__()
         self.num_channels = num_channels
         self.use_lu = use_lu
@@ -159,7 +159,7 @@ class Invertible1x1x1Conv(Flow):
     Assumes 5d input/output tensors of the form NCHWD
     """
 
-    def __init__(self, num_channels, use_lu=False, s_cap=2.0):
+    def __init__(self, num_channels, use_lu=False, s_cap=2.5):
         super().__init__()
         self.num_channels = num_channels
         self.use_lu = use_lu
