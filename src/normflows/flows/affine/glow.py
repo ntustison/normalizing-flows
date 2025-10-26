@@ -21,7 +21,7 @@ class GlowBlock2d(Flow):
         init_zeros=True,
         use_lu=True,
         net_actnorm=True,
-        s_cap=3.0
+        s_cap=2.0
     ):
         super().__init__()
         self.flows = nn.ModuleList([])
@@ -91,7 +91,7 @@ class GlowBlock3d(Flow):
         init_zeros=True,
         use_lu=True,
         net_actnorm=True,
-        s_cap=3.0
+        s_cap=2.0
     ):
         """Constructor
 

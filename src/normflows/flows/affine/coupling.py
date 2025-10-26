@@ -157,58 +157,69 @@ class AffineCoupling(Flow):
     def forward(self, z):
         z1, z2 = z
         param = self.param_map(z1)
+
         if self.scale:
             shift = param[:, 0::2, ...]
             scale_ = self._bound(param[:, 1::2, ...])
-            if self.scale_map == "exp":
-                z2 = z2 * torch.exp(scale_) + shift
-                log_det = torch.sum(scale_, dim=list(range(1, shift.dim())))
+            reduce_dims = list(range(1, shift.dim()))
+
+            if self.scale_map in ("exp", "tanh"):
+                log_s32 = scale_.float()
+                with torch.amp.autocast('cuda', enabled=False):
+                    s32 = torch.exp(log_s32)
+                z2 = z2 * s32.to(z2.dtype) + shift
+                log_det = torch.sum(log_s32, dim=reduce_dims).to(z2.dtype)
+
             elif self.scale_map == "sigmoid":
-                scale = torch.sigmoid(scale_ + 2)
-                z2 = z2 / scale + shift
-                log_det = -torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
+                scale32 = torch.sigmoid((scale_ + 2).float())
+                z2 = z2 / scale32.to(z2.dtype) + shift
+                log_det = -torch.sum(torch.log(scale32), dim=reduce_dims).to(z2.dtype)
+
             elif self.scale_map == "sigmoid_inv":
-                scale = torch.sigmoid(scale_ + 2)
-                z2 = z2 * scale + shift
-                log_det = torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
-            elif self.scale_map == "tanh":
-                # "tanh" here = tanh-bounded *log-scale*, then exp()
-                # scale_ already bounded to [-s_cap, s_cap] by self._bound(...)
-                z2 = z2 * torch.exp(scale_) + shift
-                log_det = torch.sum(scale_, dim=list(range(1, shift.dim())))
+                scale32 = torch.sigmoid((scale_ + 2).float())
+                z2 = z2 * scale32.to(z2.dtype) + shift
+                log_det = torch.sum(torch.log(scale32), dim=reduce_dims).to(z2.dtype)
+
             else:
                 raise NotImplementedError("This scale map is not implemented.")
         else:
             z2 = z2 + param
             log_det = zero_log_det_like_z(z2)
+
         return [z1, z2], log_det
 
     def inverse(self, z):
         z1, z2 = z
         param = self.param_map(z1)
+
         if self.scale:
             shift = param[:, 0::2, ...]
             scale_ = self._bound(param[:, 1::2, ...])
-            if self.scale_map == "exp":
-                z2 = (z2 - shift) * torch.exp(-scale_)
-                log_det = -torch.sum(scale_, dim=list(range(1, shift.dim())))
+            reduce_dims = list(range(1, shift.dim()))
+
+            if self.scale_map in ("exp", "tanh"):
+                log_s32 = scale_.float()
+                with torch.amp.autocast('cuda', enabled=False):
+                    inv_s32 = torch.exp(-log_s32)
+                z2 = (z2 - shift) * inv_s32.to(z2.dtype)
+                log_det = -torch.sum(log_s32, dim=reduce_dims).to(z2.dtype)
+
             elif self.scale_map == "sigmoid":
-                scale = torch.sigmoid(scale_ + 2)
-                z2 = (z2 - shift) * scale
-                log_det = torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
+                scale32 = torch.sigmoid((scale_ + 2).float())
+                z2 = (z2 - shift) * scale32.to(z2.dtype)
+                log_det = torch.sum(torch.log(scale32), dim=reduce_dims).to(z2.dtype)
+
             elif self.scale_map == "sigmoid_inv":
-                scale = torch.sigmoid(scale_ + 2)
-                z2 = (z2 - shift) / scale
-                log_det = -torch.sum(torch.log(scale), dim=list(range(1, shift.dim())))
-            elif self.scale_map == "tanh":
-                # inverse of tanh-bounded log-scale: multiply by exp(-scale_)
-                z2 = (z2 - shift) * torch.exp(-scale_)
-                log_det = -torch.sum(scale_, dim=list(range(1, shift.dim())))
+                scale32 = torch.sigmoid((scale_ + 2).float())
+                z2 = (z2 - shift) / scale32.to(z2.dtype)
+                log_det = -torch.sum(torch.log(scale32), dim=reduce_dims).to(z2.dtype)
+
             else:
-                raise NotImplementedError("The scale map" + self.scale_map + "is not implemented.")
+                raise NotImplementedError("The scale map " + self.scale_map + " is not implemented.")
         else:
             z2 = z2 - param
             log_det = zero_log_det_like_z(z2)
+
         return [z1, z2], log_det
 
 
